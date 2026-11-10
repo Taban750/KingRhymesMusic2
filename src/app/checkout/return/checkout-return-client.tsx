@@ -61,6 +61,13 @@ export default function CheckoutReturnClient() {
           <p className="mt-2 text-sm text-white/55">Your donation is confirmed and will appear on the supporters wall.</p>
           <Link href="/support" className="mt-6 inline-block"><Button>Back to support</Button></Link>
         </>
+      ) : state.kind === "merchandise" ? (
+        <>
+          <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-500/15 text-3xl">✓</div>
+          <h1 className="font-display mt-5 text-3xl">Merch order confirmed</h1>
+          <p className="mt-2 text-sm text-white/55">Your payment is confirmed. The team will contact you using the delivery details you provided.</p>
+          <Link href="/merch" className="mt-6 inline-block"><Button>Back to merch</Button></Link>
+        </>
       ) : (
         <>
           <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-emerald-500/15 text-3xl">✓</div>

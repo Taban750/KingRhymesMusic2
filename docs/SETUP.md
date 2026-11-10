@@ -79,7 +79,7 @@ In production, configure an S3-compatible object store such as Tigris or Cloudfl
 ### Tigris Object Storage
 
 1. In the [Tigris Console](https://console.storage.dev), create two buckets: one for public media and a separate private bucket for purchased full audio. Enable public reads or a public custom domain for the public bucket only; do not make the audio bucket public.
-2. Create an access key with read/write permissions for the two buckets. Treat the key and secret as credentials: add them only to local ignored `.env.local` and your host's server-side secret settings.
+2. Create separate access keys for the public and private buckets (or one key with permissions to both). The private key needs object read/write access on the private bucket; the public key needs object write access on the public bucket. Treat each key pair as credentials.
 3. Configure the app with Tigris's S3 endpoint and virtual-host addressing. Replace the bucket names, keys, and public URL with the values from your Tigris setup:
 
    ```dotenv
@@ -90,11 +90,22 @@ In production, configure an S3-compatible object store such as Tigris or Cloudfl
    S3_PRIVATE_BUCKET=your-private-audio-bucket
    S3_ACCESS_KEY_ID=tid_your_access_key
    S3_SECRET_ACCESS_KEY=tsec_your_secret_key
+   S3_PUBLIC_ACCESS_KEY_ID=tid_public_key_optional
+   S3_PUBLIC_SECRET_ACCESS_KEY=tsec_public_secret_optional
+   S3_PRIVATE_ACCESS_KEY_ID=tid_private_key_optional
+   S3_PRIVATE_SECRET_ACCESS_KEY=tsec_private_secret_optional
    S3_PUBLIC_URL=https://your-public-media-bucket.t3.storage.dev
    ```
 
-   `S3_PUBLIC_URL` must be a working public URL for the public bucket, or a custom domain you have connected to it. Verify the base URL by opening a publicly readable object after uploading it. Keep the private audio bucket private: the app creates temporary signed URLs for purchased audio.
-4. Add the same variables to your production host's environment/secret settings, restart locally or redeploy, then test uploading a cover and downloading a purchased track.
+   Separate public/private pairs override the shared pair; if a key is only for one bucket, set it in the corresponding pair. `S3_PUBLIC_URL` must be a working public URL for the public bucket. Keep the private bucket private.
+4. Admin uploads are sent directly from the browser to Tigris with short-lived signed PUT URLs, bypassing Vercel function body limits. In Tigris bucket CORS settings, allow your production site origin (and localhost during development). For an S3-style CORS editor, use a rule like this and replace the origins with your actual app origins:
+
+   ```json
+   [{"AllowedOrigins":["https://YOUR_PRODUCTION_DOMAIN","http://localhost:3000"],"AllowedMethods":["PUT","GET","HEAD"],"AllowedHeaders":["Content-Type"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3000}]
+   ```
+
+   Do not use wildcard origins unless you intentionally allow any website to upload using a signed URL. Add all four split credential variables and the bucket names to Vercel, then redeploy.
+5. Full audio, full video, and album ZIP archives use the private bucket. Audio/video previews, album preview clips, and images use the public bucket. `/admin` has Albums, Download videos, and Merch sections; the public merch store is at `/merch`. Apply all additive SQL files in `docs/migrations/` to an existing database after taking a backup. Merch checkout collects the buyer's size and delivery details; manage fulfillment from Admin → Sales.
 
 Tigris's AWS SDK configuration requires virtual-host-style requests; `S3_FORCE_PATH_STYLE=false` configures this. For other S3-compatible providers, use their required addressing style. `S3_FORCE_PATH_STYLE` defaults to `true` to preserve the existing Cloudflare R2-style configuration.
 
@@ -124,7 +135,7 @@ For production, set the environment variables in the hosting provider's secret/c
 2. Configure production secrets in the host dashboard, not in Git. At minimum set `DATABASE_URL`, a high-entropy `JWT_SECRET`, `ADMIN_EMAIL`, and the exact HTTPS `NEXT_PUBLIC_SITE_URL`. Add `ADMIN_SETUP_TOKEN` for initial admin signup; remove or rotate it after the administrator account is created. Add provider credentials only for features you have enabled.
 3. Configure the PostgreSQL provider's backups and point-in-time recovery, and verify you can restore a backup before storing real purchases or user accounts.
 4. Configure durable media storage before enabling admin uploads. Set the S3 variables for both public and private buckets, or use Vercel Blob for public media plus S3 for private full audio. Never expose the private bucket publicly.
-5. Configure the host's request-size limit for `/api/upload` to at least 62 MiB if you need the documented 60 MiB audio uploads. The route also rejects oversized requests and validates common file signatures. A proxy or serverless platform may impose a lower limit first; check its limits before relying on large uploads.
+5. Configure Tigris bucket CORS for direct browser PUTs; large media does not pass through a Vercel function. The signed upload endpoint enforces media type and size limits. Apply the SQL files under `docs/migrations/` to the production database after backing it up; these add the album/video catalog and merch order columns.
 6. Configure shared rate limiting at the host, CDN, or WAF for login, password reset, signup, checkout, donations, comments, and upload endpoints. The app's in-memory rate limiter is only a per-process fallback and does not coordinate across serverless instances or multiple replicas.
 7. Deploy to a staging URL first. Test admin login, password recovery email, any enabled Google sign-in, public media upload, a private audio download, and Flutterwave test-mode checkout plus webhook. Confirm cancelled/failed payments never unlock audio.
 8. Only after these checks pass, set production payment credentials and provider callback URLs, redeploy, and make a small live transaction that you can refund through the provider dashboard.

@@ -3,13 +3,16 @@ import { useEffect, useState } from "react";
 import { Button, Input, Textarea, Card, Badge, Modal } from "@/components/ui";
 import { useToast } from "@/components/providers";
 
-type Tab = "overview" | "songs" | "sales" | "donations" | "comments" | "portfolio" | "settings";
+type Tab = "overview" | "songs" | "albums" | "videos" | "merch" | "sales" | "donations" | "comments" | "portfolio" | "settings";
 
 export default function AdminClient({ user }: { user: { email: string; displayName: string } }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [stats, setStats] = useState<Record<string, unknown> | null>(null);
 
   const [songs, setSongs] = useState<Record<string, unknown>[]>([]);
+  const [albums, setAlbums] = useState<Record<string, unknown>[]>([]);
+  const [mediaVideos, setMediaVideos] = useState<Record<string, unknown>[]>([]);
+  const [merch, setMerch] = useState<Record<string, unknown>[]>([]);
   const [comments, setComments] = useState<Record<string, unknown>[]>([]);
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [portfolio, setPortfolio] = useState<{ milestones: unknown[]; gallery: unknown[]; videos: unknown[]; press: unknown[] }>({ milestones: [], gallery: [], videos: [], press: [] });
@@ -21,16 +24,22 @@ export default function AdminClient({ user }: { user: { email: string; displayNa
   async function loadAll() {
     push("Refreshing...", "info");
     try {
-      const [st, so, co, se, pf, vi] = await Promise.all([
+      const [st, so, co, se, pf, vi, al, mv, me] = await Promise.all([
         fetch("/api/admin/stats").then((r) => r.json()),
         fetch("/api/songs?admin=1").then((r) => r.json()),
         fetch("/api/comments?admin=1").then((r) => r.json()),
         fetch("/api/settings").then((r) => r.json()),
         fetch("/api/portfolio").then((r) => r.json()),
         fetch("/api/visitors").then((r) => r.json()),
+        fetch("/api/catalog/albums?admin=1").then((r) => r.json()),
+        fetch("/api/catalog/videos?admin=1").then((r) => r.json()),
+        fetch("/api/catalog/merch?admin=1").then((r) => r.json()),
       ]);
       if (!st.error) setStats(st);
       setSongs(so.songs || []);
+      setAlbums(al.items || []);
+      setMediaVideos(mv.items || []);
+      setMerch(me.items || []);
       setComments(co.comments || []);
       setSettings(se.settings || {});
       setPortfolio(pf);
@@ -54,14 +63,13 @@ export default function AdminClient({ user }: { user: { email: string; displayNa
   async function uploadFile(file: File, kind: string): Promise<string | null> {
     setUploading(kind);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("kind", kind);
-      const r = await fetch("/api/upload", { method: "POST", body: fd });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "Upload failed");
+      const sign = await fetch("/api/upload/presign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, type: file.type || "application/octet-stream", size: file.size, kind }) });
+      const j = await sign.json();
+      if (!sign.ok) throw new Error(j.error || "Upload setup failed");
+      const putResult = await fetch(j.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+      if (!putResult.ok) throw new Error(`Tigris upload failed (${putResult.status}). Check bucket CORS and key permissions.`);
       push("Uploaded ✓", "success");
-      return j.url as string;
+      return j.path as string;
     } catch (e: unknown) {
       push(e instanceof Error ? e.message : "Upload failed", "error");
       return null;
@@ -73,6 +81,9 @@ export default function AdminClient({ user }: { user: { email: string; displayNa
   const TABS: { id: Tab; label: string }[] = [
     { id: "overview", label: "📊 Overview" },
     { id: "songs", label: "🎵 Songs" },
+    { id: "albums", label: "💿 Albums" },
+    { id: "videos", label: "🎬 Download videos" },
+    { id: "merch", label: "🧢 Merch" },
     { id: "sales", label: "💰 Sales" },
     { id: "donations", label: "♥ Donations" },
     { id: "comments", label: "💬 Comments" },
@@ -101,6 +112,9 @@ export default function AdminClient({ user }: { user: { email: string; displayNa
       <div className="mt-6 pb-10">
         {tab === "overview" && <Overview stats={stats} />}
         {tab === "songs" && <SongsTab songs={songs} onReload={loadAll} editing={editing} setEditing={setEditing} showNew={showNew} setShowNew={setShowNew} uploadFile={uploadFile} uploading={uploading} push={push} />}
+        {tab === "albums" && <CatalogTab kind="albums" items={albums} uploadFile={uploadFile} uploading={uploading} onReload={loadAll} push={push} />}
+        {tab === "videos" && <CatalogTab kind="videos" items={mediaVideos} uploadFile={uploadFile} uploading={uploading} onReload={loadAll} push={push} />}
+        {tab === "merch" && <MerchTab items={merch} uploadFile={uploadFile} uploading={uploading} onReload={loadAll} push={push} />}
         {tab === "sales" && <SalesTab stats={stats} />}
         {tab === "donations" && <DonationsTab stats={stats} />}
         {tab === "comments" && <CommentsTab comments={comments} onReload={loadAll} push={push} />}
@@ -258,9 +272,14 @@ function SongsTab({ songs, onReload, editing, setEditing, showNew, setShowNew, u
 
 function SalesTab({ stats }: { stats: Record<string, unknown> | null }) {
   const rows = ((stats?.recentPurchases as Record<string, unknown>[]) || []);
+  async function setFulfillment(id: string, status: string) {
+    const response = await fetch(`/api/admin/merch-orders/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    if (!response.ok) push("Could not update order", "error"); else push("Order updated", "success");
+  }
+  const { push } = useToast();
   function csv() {
-    const head = "id,song_id,email,amount,currency,provider,ref,status,date\n";
-    const body = rows.map((r) => [r.id, r.songId, r.buyerEmail, r.amount, r.currency, r.provider, r.providerRef, r.status, r.createdAt].join(",")).join("\n");
+    const head = "id,item,email,amount,currency,payment_status,fulfillment_status,delivery_name,delivery_phone,delivery_address,date\n";
+    const body = rows.map((r) => [r.id, r.merchTitle || (r.songId ? "Song" : r.albumId ? "Album" : r.videoId ? "Video" : ""), r.buyerEmail, r.amount, r.currency, r.status, r.fulfillmentStatus, r.shippingName, r.shippingPhone, r.shippingAddress, r.createdAt].map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
     const blob = new Blob([head + body], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -271,9 +290,9 @@ function SalesTab({ stats }: { stats: Record<string, unknown> | null }) {
     <div>
       <div className="flex items-center justify-between"><div className="text-sm text-white/50">{rows.length} recent purchases</div><Button variant="ghost" onClick={csv}>⬇ Export CSV</Button></div>
       <div className="glass-surface mt-3 overflow-x-auto rounded-2xl">
-        <table className="w-full text-xs min-w-[720px]">
-          <thead><tr className="text-left text-white/40 border-b border-white/10"><th className="p-3">Email</th><th className="p-3">Amount</th><th className="p-3">Provider</th><th className="p-3">Status</th><th className="p-3">Date</th></tr></thead>
-          <tbody>{rows.map((r, i) => <tr key={i} className="border-b border-white/[0.05]"><td className="p-3">{String(r.buyerEmail)}</td><td className="p-3">{String(r.amount)} {String(r.currency)}</td><td className="p-3">{String(r.provider)}</td><td className="p-3"><span className={`rounded-full px-2 py-0.5 ${r.status === "completed" ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"}`}>{String(r.status)}</span></td><td className="p-3 text-white/40">{String(r.createdAt || "").slice(0, 16).replace("T", " ")}</td></tr>)}</tbody>
+        <table className="w-full text-xs min-w-[980px]">
+          <thead><tr className="text-left text-white/40 border-b border-white/10"><th className="p-3">Item / delivery</th><th className="p-3">Buyer</th><th className="p-3">Amount</th><th className="p-3">Payment</th><th className="p-3">Fulfillment</th><th className="p-3">Date</th></tr></thead>
+          <tbody>{rows.map((r, i) => <tr key={i} className="border-b border-white/[0.05]"><td className="p-3"><strong>{String(r.merchTitle || (r.songId ? "Song purchase" : r.albumId ? "Album purchase" : r.videoId ? "Video purchase" : "Purchase"))}</strong>{Boolean(r.merchProductId) && <div className="mt-1 text-white/50">{String(r.merchSize)} · {String(r.shippingName)}<br />{String(r.shippingPhone)} · {String(r.shippingAddress)}</div>}</td><td className="p-3">{String(r.buyerEmail)}</td><td className="p-3">{String(r.amount)} {String(r.currency)}</td><td className="p-3"><span className={`rounded-full px-2 py-0.5 ${r.status === "completed" ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300"}`}>{String(r.status)}</span></td><td className="p-3">{Boolean(r.merchProductId) ? <select value={String(r.fulfillmentStatus || "unfulfilled")} onChange={(e) => void setFulfillment(String(r.id), e.target.value)} className="rounded-lg border border-white/10 bg-black/30 px-2 py-1">{["unfulfilled", "processing", "shipped", "delivered", "cancelled"].map((s) => <option key={s} value={s}>{s}</option>)}</select> : "—"}</td><td className="p-3 text-white/40">{String(r.createdAt || "").slice(0, 16).replace("T", " ")}</td></tr>)}</tbody>
         </table>
         {rows.length === 0 && <div className="p-8 text-center text-white/40 text-sm">No sales yet — share your music link!</div>}
       </div>
@@ -330,6 +349,85 @@ function CommentsTab({ comments, onReload, push }: { comments: Record<string, un
       {comments.length === 0 && <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-white/40">No comments yet.</div>}
     </div>
   );
+}
+
+function MerchTab({ items, uploadFile, uploading, onReload, push }: {
+  items: Record<string, unknown>[];
+  uploadFile: (file: File, kind: string) => Promise<string | null>;
+  uploading: string;
+  onReload: () => void;
+  push: (message: string, type?: "success" | "error" | "info") => void;
+}) {
+  const empty = { title: "", category: "cap", description: "", priceUsd: "25.00", imageUrl: "", availableSizes: "One size", isPublished: true };
+  const [form, setForm] = useState<Record<string, unknown>>(empty);
+  const [editingId, setEditingId] = useState("");
+  function edit(item?: Record<string, unknown>) {
+    setEditingId(String(item?.id || ""));
+    setForm(item ? { ...item, availableSizes: Array.isArray(item.availableSizes) ? item.availableSizes.join(", ") : "One size" } : { ...empty });
+  }
+  async function save() {
+    const body = { ...form, availableSizes: String(form.availableSizes || "One size").split(",").map((s) => s.trim()).filter(Boolean) };
+    const response = await fetch(editingId ? `/api/catalog/merch/${editingId}` : "/api/catalog/merch", { method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const result = await response.json();
+    if (!response.ok) { push(result.error || "Could not save item", "error"); return; }
+    push("Merch item saved", "success"); edit(); onReload();
+  }
+  async function remove(id: string) { if (!confirm("Delete this merch item? Paid orders prevent deletion.")) return; const r = await fetch(`/api/catalog/merch/${id}`, { method: "DELETE" }); if (!r.ok) push("This item may have existing orders; unpublish it instead.", "error"); onReload(); }
+  return <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+    <Card className="p-5"><h2 className="font-display text-2xl">{editingId ? "Edit" : "Add"} merch</h2><div className="mt-4 space-y-3">
+      <Input placeholder="Product name" value={String(form.title || "")} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+      <select value={String(form.category)} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm"><option value="cap">Cap</option><option value="tshirt">T-shirt</option><option value="hoodie">Hoodie</option></select>
+      <Textarea placeholder="Product description" value={String(form.description || "")} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+      <Input type="number" min="0.01" step="0.01" placeholder="Price in USD" value={String(form.priceUsd || "")} onChange={(e) => setForm({ ...form, priceUsd: e.target.value })} />
+      <Input placeholder="Available sizes, comma separated" value={String(form.availableSizes || "")} onChange={(e) => setForm({ ...form, availableSizes: e.target.value })} />
+      <div className="flex flex-wrap items-center gap-3"><Input placeholder="Product image URL" value={String(form.imageUrl || "")} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} />
+        <label className="shrink-0 cursor-pointer rounded-xl border border-white/10 px-4 py-3 text-xs hover:border-[#D4AF37]/60">{uploading === "cover" ? "Uploading…" : "Upload image"}<input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={async (e) => { const file = e.target.files?.[0]; if (file) { const url = await uploadFile(file, "cover"); if (url) setForm((prev) => ({ ...prev, imageUrl: url })); } e.currentTarget.value = ""; }} /></label>
+      </div>
+      <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!form.isPublished} onChange={(e) => setForm({ ...form, isPublished: e.target.checked })} /> Published in the public store</label>
+      <div className="flex gap-2"><Button disabled={!String(form.title || "").trim() || !String(form.imageUrl || "").trim()} onClick={save}>{editingId ? "Update item" : "Save item"}</Button>{editingId && <Button variant="ghost" onClick={() => edit()}>Cancel</Button>}</div>
+    </div></Card>
+    <div className="space-y-2">{items.map((item) => <div key={String(item.id)} className="glass-surface flex items-center gap-3 rounded-xl p-3"><img src={String(item.imageUrl)} alt="" className="h-16 w-16 rounded-lg object-cover" /><div className="min-w-0 flex-1"><strong>{String(item.title)}</strong><div className="text-xs capitalize text-white/45">{String(item.category)} · ${String(item.priceUsd)} · {item.isPublished ? "Published" : "Hidden"}</div></div><Button variant="ghost" onClick={() => edit(item)}>Edit</Button><Button variant="ghost" onClick={() => remove(String(item.id))}>Delete</Button></div>)}{!items.length && <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-white/40">No merch listed yet.</div>}</div>
+  </div>;
+}
+
+function CatalogTab({ kind, items, uploadFile, uploading, onReload, push }: {
+  kind: "albums" | "videos";
+  items: Record<string, unknown>[];
+  uploadFile: (file: File, kind: string) => Promise<string | null>;
+  uploading: string;
+  onReload: () => void;
+  push: (message: string, type?: "success" | "error" | "info") => void;
+}) {
+  const album = kind === "albums";
+  const [form, setForm] = useState<Record<string, unknown>>({ title: "", description: "", priceUsd: album ? "9.99" : "1.99", coverUrl: "", archivePath: "", previewPath: "", videoFullPath: "", videoPreviewPath: "", isFree: false, isPublished: true });
+  const [editingId, setEditingId] = useState("");
+  const fullKey = album ? "archivePath" : "videoFullPath";
+  const previewKey = album ? "previewPath" : "videoPreviewPath";
+  function select(item?: Record<string, unknown>) {
+    setEditingId(String(item?.id || ""));
+    setForm(item ? { ...item } : { title: "", description: "", priceUsd: album ? "9.99" : "1.99", coverUrl: "", archivePath: "", previewPath: "", videoFullPath: "", videoPreviewPath: "", isFree: false, isPublished: true });
+  }
+  async function submit() {
+    const response = await fetch(editingId ? `/api/catalog/${kind}/${editingId}` : `/api/catalog/${kind}`, { method: editingId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+    const result = await response.json();
+    if (!response.ok) { push(result.error || "Save failed", "error"); return; }
+    push("Saved ✓", "success"); select(); onReload();
+  }
+  async function remove(id: string) { if (!confirm("Delete this item?")) return; await fetch(`/api/catalog/${kind}/${id}`, { method: "DELETE" }); onReload(); }
+  const fileInput = (label: string, uploadKind: string, key: string, accept: string) => <label className="cursor-pointer rounded-xl border border-white/10 px-4 py-3 text-xs hover:border-[#D4AF37]/60">{uploading === uploadKind ? "Uploading…" : `${label}${form[key] ? " ✓" : ""}`}<input type="file" accept={accept} className="hidden" onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; const path = await uploadFile(file, uploadKind); if (path) setForm((prev) => ({ ...prev, [key]: path })); e.currentTarget.value = ""; }} /></label>;
+  return <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+    <Card className="p-5"><h2 className="font-display text-2xl">{editingId ? "Edit" : "Add"} {album ? "album" : "download video"}</h2>
+      <div className="mt-4 space-y-3"><Input placeholder="Title" value={String(form.title || "")} onChange={(e) => setForm({ ...form, title: e.target.value })} /><Textarea placeholder="Description" value={String(form.description || "")} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        <Input placeholder="Price in USD" type="number" min="0" step="0.01" value={String(form.priceUsd || "")} onChange={(e) => setForm({ ...form, priceUsd: e.target.value })} />
+        <Input placeholder="Cover image URL (or upload below)" value={String(form.coverUrl || "")} onChange={(e) => setForm({ ...form, coverUrl: e.target.value })} />
+        <div className="flex flex-wrap gap-2">{fileInput("Upload cover", "cover", "coverUrl", "image/*")}{album ? fileInput("Upload private ZIP archive", "album", fullKey, ".zip,application/zip") : fileInput("Upload private full video", "video", fullKey, "video/mp4,video/webm,video/quicktime")}{fileInput(album ? "Upload public audio preview" : "Upload public video preview", album ? "preview" : "video-preview", previewKey, album ? "audio/*" : "video/mp4,video/webm,video/quicktime")}</div>
+        <div className="flex gap-4 text-xs"><label><input type="checkbox" checked={!!form.isFree} onChange={(e) => setForm({ ...form, isFree: e.target.checked })} /> Free</label><label><input type="checkbox" checked={!!form.isPublished} onChange={(e) => setForm({ ...form, isPublished: e.target.checked })} /> Published</label></div>
+        <div className="flex gap-2"><Button onClick={submit} disabled={!String(form.title || "").trim()}>{editingId ? "Update" : "Save"}</Button>{editingId && <Button variant="ghost" onClick={() => select()}>Cancel</Button>}</div>
+        <p className="text-[11px] text-white/40">Private full files require matching private Tigris bucket credentials. Preview files are public.</p>
+      </div>
+    </Card>
+    <div className="space-y-2">{items.map((item) => <div key={String(item.id)} className="glass-surface flex items-center justify-between gap-3 rounded-xl p-4"><div><strong>{String(item.title)}</strong><div className="text-xs text-white/45">{item.isPublished ? "Published" : "Draft"} · {item.isFree ? "Free" : `$${String(item.priceUsd)}`}</div></div><div className="flex gap-2"><Button variant="ghost" onClick={() => select(item)}>Edit</Button><Button variant="ghost" onClick={() => remove(String(item.id))}>Delete</Button></div></div>)}{!items.length && <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-white/40">No {kind} yet. Add one here.</div>}</div>
+  </div>;
 }
 
 function PortfolioTab({ portfolio, onReload, uploadFile, push }: {

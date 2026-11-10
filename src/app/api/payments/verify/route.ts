@@ -15,8 +15,9 @@ export async function POST(req: Request) {
     const settled = await settleFlutterwaveTransaction(String(transactionId), String(reference), expected);
 
     if (settled.kind === "donation") return NextResponse.json({ status: "completed", kind: "donation" });
-    if (!settled.songId) return NextResponse.json({ error: "Purchase has no song attached" }, { status: 409 });
-    const token = signDownload({ purchaseId: settled.id, songId: settled.songId, email: settled.email }, "24h");
+    if (settled.merchProductId) return NextResponse.json({ status: "completed", kind: "merchandise", orderId: settled.id });
+    if (!settled.songId && !settled.albumId && !settled.videoId) return NextResponse.json({ error: "Purchase has no product attached" }, { status: 409 });
+    const token = signDownload({ purchaseId: settled.id, songId: settled.songId || undefined, albumId: settled.albumId || undefined, videoId: settled.videoId || undefined, email: settled.email }, "24h");
     return NextResponse.json({ status: "completed", kind: "purchase", downloadUrl: `/api/download?token=${token}` });
   } catch (e) {
     console.error(e);

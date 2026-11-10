@@ -72,12 +72,12 @@ export async function ensureAdmin(email: string, displayName = "Artist") {
 
 export const SESSION_COOKIE = COOKIE_NAME;
 
-export function signDownload(payload: { purchaseId?: string; songId: string; email?: string }, expiresIn = "10m") {
+export function signDownload(payload: { purchaseId?: string; songId?: string; albumId?: string; videoId?: string; email?: string }, expiresIn = "10m") {
   return jwt.sign(payload, JWT_SECRET, { expiresIn } as jwt.SignOptions);
 }
 export function verifyDownload(token: string) {
   try {
-    return jwt.verify(token, JWT_SECRET) as { purchaseId?: string; songId: string; email?: string };
+    return jwt.verify(token, JWT_SECRET) as { purchaseId?: string; songId?: string; albumId?: string; videoId?: string; email?: string };
   } catch {
     return null;
   }

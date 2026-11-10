@@ -26,7 +26,7 @@ export async function settleFlutterwaveTransaction(transactionId: string, refere
       });
       await db.update(purchases).set({ status: "completed" }).where(eq(purchases.id, purchase.id));
     }
-    return { kind: "purchase" as const, id: purchase.id, songId: purchase.songId, email: purchase.buyerEmail };
+    return { kind: "purchase" as const, id: purchase.id, songId: purchase.songId, albumId: purchase.albumId, videoId: purchase.videoId, merchProductId: purchase.merchProductId, email: purchase.buyerEmail };
   }
 
   const donation = donationRows[0];

@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { songs, purchases, donations, comments, subscribers } from "@/db/schema";
+import { songs, purchases, merchProducts, donations, comments, subscribers } from "@/db/schema";
 import { getSession } from "@/lib/auth";
 import { CURRENCIES } from "@/lib/currency";
 
 export async function GET() {
   const session = await getSession();
   if (!session || session.role !== "admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
-  const [songRows, purchaseRows, donationRows, commentRows, subRows] = await Promise.all([
+  const [songRows, purchaseRows, merchRows, donationRows, commentRows, subRows] = await Promise.all([
     db.select().from(songs),
     db.select().from(purchases),
+    db.select().from(merchProducts),
     db.select().from(donations),
     db.select().from(comments),
     db.select().from(subscribers),
@@ -42,7 +43,10 @@ export async function GET() {
     commentCount: commentRows.length,
     subscriberCount: subRows.length,
     earnings: days,
-    recentPurchases: purchaseRows.slice(0, 10),
+    recentPurchases: [...purchaseRows].sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0)).slice(0, 30).map((purchase) => ({
+      ...purchase,
+      merchTitle: merchRows.find((product) => product.id === purchase.merchProductId)?.title || null,
+    })),
     recentDonations: donationRows.slice(0, 10),
     recentComments: commentRows.slice(0, 10),
   });

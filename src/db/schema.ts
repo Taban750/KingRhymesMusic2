@@ -49,9 +49,59 @@ export const songs = pgTable("songs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const albums = pgTable("albums", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: varchar("title", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull().unique(),
+  coverUrl: text("cover_url"),
+  archivePath: text("archive_path"),
+  previewPath: text("preview_path"),
+  description: text("description"),
+  priceUsd: numeric("price_usd", { precision: 10, scale: 2 }).notNull().default("9.99"),
+  isFree: boolean("is_free").notNull().default(false),
+  isPublished: boolean("is_published").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const mediaVideos = pgTable("media_videos", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: varchar("title", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull().unique(),
+  coverUrl: text("cover_url"),
+  videoFullPath: text("video_full_path"),
+  videoPreviewPath: text("video_preview_path"),
+  description: text("description"),
+  priceUsd: numeric("price_usd", { precision: 10, scale: 2 }).notNull().default("1.99"),
+  isFree: boolean("is_free").notNull().default(false),
+  isPublished: boolean("is_published").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const merchProducts = pgTable("merch_products", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  title: varchar("title", { length: 255 }).notNull(),
+  slug: varchar("slug", { length: 255 }).notNull().unique(),
+  category: varchar("category", { length: 30 }).notNull(),
+  imageUrl: text("image_url").notNull(),
+  galleryUrls: jsonb("gallery_urls").$type<string[]>().notNull().default([]),
+  description: text("description"),
+  availableSizes: jsonb("available_sizes").$type<string[]>().notNull().default(["One size"]),
+  priceUsd: numeric("price_usd", { precision: 10, scale: 2 }).notNull(),
+  isPublished: boolean("is_published").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const purchases = pgTable("purchases", {
   id: uuid("id").primaryKey().defaultRandom(),
   songId: uuid("song_id").references(() => songs.id, { onDelete: "cascade" }),
+  albumId: uuid("album_id").references(() => albums.id, { onDelete: "restrict" }),
+  videoId: uuid("video_id").references(() => mediaVideos.id, { onDelete: "restrict" }),
+  merchProductId: uuid("merch_product_id").references(() => merchProducts.id, { onDelete: "restrict" }),
+  merchSize: varchar("merch_size", { length: 40 }),
+  shippingName: varchar("shipping_name", { length: 160 }),
+  shippingPhone: varchar("shipping_phone", { length: 40 }),
+  shippingAddress: text("shipping_address"),
+  fulfillmentStatus: varchar("fulfillment_status", { length: 30 }).notNull().default("not_applicable"),
   buyerEmail: varchar("buyer_email", { length: 255 }).notNull(),
   amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
   currency: varchar("currency", { length: 10 }).notNull().default("USD"),
