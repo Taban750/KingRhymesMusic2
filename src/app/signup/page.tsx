@@ -35,7 +35,7 @@ export default function SignupPage() {
 
   return (
     <div className="mx-auto max-w-md px-4 pt-14">
-      <div className="text-center"><div className="text-[11px] uppercase tracking-[0.28em] text-[#D4AF37] font-bold">Join the family</div><h1 className="font-display text-4xl mt-2">Sign up</h1><p className="mt-2 text-sm text-white/50">Comment, rate and get receipts for your purchases.</p></div>
+      <div className="text-center"><div className="text-[11px] uppercase tracking-[0.28em] text-[#D4AF37] font-bold">Optional fan account</div><h1 className="font-display text-4xl mt-2">Sign up</h1><p className="mt-2 text-sm text-white/50">Browse music, albums, videos, and merch without an account. Signing up is optional; you can use a fan account for comments, ratings, and purchase receipts. To receive new release and product updates, subscribe by email in the footer—no account needed.</p></div>
       <Card className="mt-6 space-y-3">
         <div><label className="text-xs text-white/50">Display name</label><div className="mt-1"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sarah K." /></div></div>
         <div><label className="text-xs text-white/50">Email</label><div className="mt-1"><Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" type="email" /></div></div>
