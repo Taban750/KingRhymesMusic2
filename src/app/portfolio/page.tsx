@@ -3,6 +3,8 @@ import { siteSettings, songs, ratings, galleryItems, videos, pressItems } from "
 import PortfolioClient from "./portfolio-client";
 import { DEFAULT_GALLERY_PHOTOS, DEFAULT_STREAMING_LINKS } from "@/lib/site-content";
 
+export const dynamic = "force-dynamic";
+
 export default async function PortfolioPage() {
   let settings: Record<string, unknown> = { artistName: "KING RHYMES", tagline: "Where Rhymes Reign", streamingLinks: DEFAULT_STREAMING_LINKS };
   let discography: Record<string, unknown>[] = [];

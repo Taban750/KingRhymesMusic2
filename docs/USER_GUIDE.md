@@ -57,13 +57,13 @@ The dashboard is available at `/admin` after signing in with an admin account. I
 - **Portfolio:** add or remove milestones, gallery photos, videos, and press quotes.
 - **Settings:** update the artist profile, homepage hero, featured song, social links, streaming links, and other site presentation options. Saved settings take effect immediately.
 
-Store full masters only in the private object-storage bucket in production. Configure persistent S3-compatible storage before accepting uploads on hosting with an ephemeral filesystem.
+Store full masters only in the private Supabase Storage bucket in production.
 
 ## Site owner checklist
 
 - Configure PostgreSQL, `ADMIN_EMAIL`, `ADMIN_SETUP_TOKEN`, and a strong `JWT_SECRET`; initialize the schema as described in [Project Setup](SETUP.md).
 - Configure SMTP before relying on password resets, Google OAuth before offering Google login, and Flutterwave before accepting live payments.
-- Set up persistent S3-compatible media storage before uploading production content.
+- Configure the Supabase public and private media buckets before uploading production content.
 - Use test-mode payment credentials for checkout testing. Complete a small end-to-end purchase and verify the download flow before launch.
 - Keep database backups and rotate secrets if they are exposed. Never commit `.env.local` or production credentials.
 

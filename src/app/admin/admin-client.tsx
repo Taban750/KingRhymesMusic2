@@ -1,4 +1,5 @@
 "use client";
+import { Upload as TusUpload } from "tus-js-client";
 import { useEffect, useState } from "react";
 import { Button, Input, Textarea, Card, Badge, Modal } from "@/components/ui";
 import { useToast } from "@/components/providers";
@@ -66,8 +67,26 @@ export default function AdminClient({ user }: { user: { email: string; displayNa
       const sign = await fetch("/api/upload/presign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, type: file.type || "application/octet-stream", size: file.size, kind }) });
       const j = await sign.json();
       if (!sign.ok) throw new Error(j.error || "Upload setup failed");
-      const putResult = await fetch(j.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
-      if (!putResult.ok) throw new Error(`Tigris upload failed (${putResult.status}). Check bucket CORS and key permissions.`);
+      if (file.size > 6 * 1024 * 1024) {
+        if (!j.token || !j.resumableEndpoint || !j.bucket || !j.objectName) throw new Error("Supabase resumable upload setup failed");
+        await new Promise<void>((resolve, reject) => {
+          const upload = new TusUpload(file, {
+            endpoint: j.resumableEndpoint,
+            retryDelays: [0, 3000, 5000, 10000, 20000],
+            headers: { "x-signature": j.token },
+            uploadDataDuringCreation: true,
+            removeFingerprintOnSuccess: true,
+            chunkSize: 6 * 1024 * 1024,
+            metadata: { bucketName: j.bucket, objectName: j.objectName, contentType: file.type || "application/octet-stream", cacheControl: "31536000" },
+            onError: reject,
+            onSuccess: () => resolve(),
+          });
+          upload.start();
+        });
+      } else {
+        const putResult = await fetch(j.uploadUrl, { method: "PUT", headers: j.headers || { "Content-Type": file.type || "application/octet-stream" }, body: file });
+        if (!putResult.ok) throw new Error(`Supabase upload failed (${putResult.status}). Check the bucket and storage settings.`);
+      }
       push("Uploaded ✓", "success");
       return j.path as string;
     } catch (e: unknown) {
@@ -82,7 +101,7 @@ export default function AdminClient({ user }: { user: { email: string; displayNa
     { id: "overview", label: "📊 Overview" },
     { id: "songs", label: "🎵 Songs" },
     { id: "albums", label: "💿 Albums" },
-    { id: "videos", label: "🎬 Download videos" },
+    { id: "videos", label: "🎬 Upload videos" },
     { id: "merch", label: "🧢 Merch" },
     { id: "sales", label: "💰 Sales" },
     { id: "donations", label: "♥ Donations" },
@@ -416,14 +435,14 @@ function CatalogTab({ kind, items, uploadFile, uploading, onReload, push }: {
   async function remove(id: string) { if (!confirm("Delete this item?")) return; await fetch(`/api/catalog/${kind}/${id}`, { method: "DELETE" }); onReload(); }
   const fileInput = (label: string, uploadKind: string, key: string, accept: string) => <label className="cursor-pointer rounded-xl border border-white/10 px-4 py-3 text-xs hover:border-[#D4AF37]/60">{uploading === uploadKind ? "Uploading…" : `${label}${form[key] ? " ✓" : ""}`}<input type="file" accept={accept} className="hidden" onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; const path = await uploadFile(file, uploadKind); if (path) setForm((prev) => ({ ...prev, [key]: path })); e.currentTarget.value = ""; }} /></label>;
   return <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-    <Card className="p-5"><h2 className="font-display text-2xl">{editingId ? "Edit" : "Add"} {album ? "album" : "download video"}</h2>
+    <Card className="p-5"><h2 className="font-display text-2xl">{editingId ? "Edit" : "Add"} {album ? "album" : "video"}</h2>
       <div className="mt-4 space-y-3"><Input placeholder="Title" value={String(form.title || "")} onChange={(e) => setForm({ ...form, title: e.target.value })} /><Textarea placeholder="Description" value={String(form.description || "")} onChange={(e) => setForm({ ...form, description: e.target.value })} />
         <Input placeholder="Price in USD" type="number" min="0" step="0.01" value={String(form.priceUsd || "")} onChange={(e) => setForm({ ...form, priceUsd: e.target.value })} />
         <Input placeholder="Cover image URL (or upload below)" value={String(form.coverUrl || "")} onChange={(e) => setForm({ ...form, coverUrl: e.target.value })} />
         <div className="flex flex-wrap gap-2">{fileInput("Upload cover", "cover", "coverUrl", "image/*")}{album ? fileInput("Upload private ZIP archive", "album", fullKey, ".zip,application/zip") : fileInput("Upload private full video", "video", fullKey, "video/mp4,video/webm,video/quicktime")}{fileInput(album ? "Upload public audio preview" : "Upload public video preview", album ? "preview" : "video-preview", previewKey, album ? "audio/*" : "video/mp4,video/webm,video/quicktime")}</div>
         <div className="flex gap-4 text-xs"><label><input type="checkbox" checked={!!form.isFree} onChange={(e) => setForm({ ...form, isFree: e.target.checked })} /> Free</label><label><input type="checkbox" checked={!!form.isPublished} onChange={(e) => setForm({ ...form, isPublished: e.target.checked })} /> Published</label></div>
         <div className="flex gap-2"><Button onClick={submit} disabled={!String(form.title || "").trim()}>{editingId ? "Update" : "Save"}</Button>{editingId && <Button variant="ghost" onClick={() => select()}>Cancel</Button>}</div>
-        <p className="text-[11px] text-white/40">Private full files require matching private Tigris bucket credentials. Preview files are public.</p>
+        <p className="text-[11px] text-white/40">Full files are stored privately in Supabase. Preview files are public.</p>
       </div>
     </Card>
     <div className="space-y-2">{items.map((item) => <div key={String(item.id)} className="glass-surface flex items-center justify-between gap-3 rounded-xl p-4"><div><strong>{String(item.title)}</strong><div className="text-xs text-white/45">{item.isPublished ? "Published" : "Draft"} · {item.isFree ? "Free" : `$${String(item.priceUsd)}`}</div></div><div className="flex gap-2"><Button variant="ghost" onClick={() => select(item)}>Edit</Button><Button variant="ghost" onClick={() => remove(String(item.id))}>Delete</Button></div></div>)}{!items.length && <div className="rounded-2xl border border-dashed border-white/10 p-8 text-center text-sm text-white/40">No {kind} yet. Add one here.</div>}</div>

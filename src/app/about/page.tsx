@@ -2,6 +2,8 @@ import { db } from "@/db";
 import { siteSettings, milestones } from "@/db/schema";
 import AboutClient from "./about-client";
 
+export const dynamic = "force-dynamic";
+
 export default async function AboutPage() {
   let settings: Record<string, unknown> = {};
   let miles: { year: string; title: string; description?: string | null }[] = [];

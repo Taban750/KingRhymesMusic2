@@ -9,7 +9,7 @@ npm install
 Copy-Item .env.example .env.local
 ```
 
-Configure `DATABASE_URL` with a PostgreSQL connection string. Set `DIRECT_URL` to a direct database connection when available; Drizzle uses it for schema changes. Keep secrets private; `.env.local` is excluded from source control. Set `ADMIN_EMAIL` to the artist's account email. Generate separate random values for `JWT_SECRET` and `ADMIN_SETUP_TOKEN`:
+Configure `DATABASE_URL` with the Supabase **Transaction pooler** connection string from the project's **Connect** dialog. Use the pooler on port `6543` for the Vercel runtime. Set `DIRECT_URL` to the Supabase direct connection string from the same dialog for local schema tools. Keep secrets private; `.env.local` is excluded from source control. Set `ADMIN_EMAIL` to the artist's account email. Generate separate random values for `JWT_SECRET` and `ADMIN_SETUP_TOKEN`:
 
 ```powershell
 node -p "require('crypto').randomBytes(48).toString('base64url')"
@@ -19,13 +19,17 @@ Never put secret keys or database passwords in variables prefixed with `NEXT_PUB
 
 ## 2. Initialize PostgreSQL
 
-Create or update the database tables from the Drizzle schema:
+For a new, empty Supabase database, create the application tables from the Drizzle schema:
 
 ```powershell
 npx drizzle-kit push
 ```
 
-The application stores account profiles, content, and purchases in PostgreSQL. `drizzle-kit push` applies the current schema, including password-reset token storage. Back up production data before applying schema changes.
+The application stores account profiles, content, and purchases in Supabase PostgreSQL. `drizzle-kit push` applies the current schema, including password-reset token storage. Back up production data before applying schema changes.
+
+### Existing production data
+
+The production data was migrated to the Supabase PostgreSQL project. For future migrations, take a Supabase backup and use the Supabase connection strings from its **Connect** dialog. Vercel uses the Transaction pooler URI (port `6543`); local Drizzle tools use `DIRECT_URL`. Never commit connection strings. Percent-encode reserved characters in URI passwords.
 
 ## 3. Configure email and sign-in
 
@@ -72,50 +76,15 @@ For Gmail SMTP specifically, enable 2-Step Verification on the Google account, c
 
 For email/password setup, create the account at `/signup` using the exact `ADMIN_EMAIL` value and provide `ADMIN_SETUP_TOKEN`. The first successful signup for that address becomes the administrator. If an account for that email already exists, a successful password login promotes that configured address to administrator. Alternatively, Google sign-in grants administrator access to the configured email only when Google confirms that email as verified. Other accounts receive fan access. See [the webapp user guide](USER_GUIDE.md) for creator login and everyday usage.
 
-## 4. Configure persistent media uploads
+## 4. Configure Supabase Storage
 
-In production, configure an S3-compatible object store such as Tigris or Cloudflare R2. Public media (covers, previews, and gallery images) is served from the public bucket URL. Purchased full audio is stored in the private bucket and served using short-lived signed URLs after purchase checks.
+Supabase Storage is the only remote media store. Create a public bucket named `media-public` for covers, previews, gallery photos, and hero images. Create a private bucket named `media-private` for full audio, video, and album archives. Keep the second bucket private so downloads continue through the app's purchase checks.
 
-### Tigris Object Storage
+Configure the server with `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (or the project's server-side secret key), `SUPABASE_PUBLIC_MEDIA_BUCKET=media-public`, and `SUPABASE_PRIVATE_MEDIA_BUCKET=media-private`. The secret key must never use a `NEXT_PUBLIC_` prefix or be committed. Admin uploads use signed upload URLs and go directly from the browser to Supabase, avoiding Vercel request-body limits. Production private downloads use short-lived signed URLs after the app verifies the purchase.
 
-1. In the [Tigris Console](https://console.storage.dev), create two buckets: one for public media and a separate private bucket for purchased full audio. Enable public reads or a public custom domain for the public bucket only; do not make the audio bucket public.
-2. Create separate access keys for the public and private buckets (or one key with permissions to both). The private key needs object read/write access on the private bucket; the public key needs object write access on the public bucket. Treat each key pair as credentials.
-3. Configure the app with Tigris's S3 endpoint and virtual-host addressing. Replace the bucket names, keys, and public URL with the values from your Tigris setup:
+Supabase Free projects cap individual files at 50 MB. Larger audio, video, and archive uploads require raising the Storage file size limit on a paid Supabase plan. For large files, use Supabase resumable uploads when the project's configured cap allows it. Local development may use `public/uploads/` and `.private-uploads/` when no Supabase server key is present. Never use local filesystem media storage in production.
 
-   ```dotenv
-   S3_ENDPOINT=https://t3.storage.dev
-   S3_REGION=auto
-   S3_FORCE_PATH_STYLE=false
-   S3_PUBLIC_BUCKET=your-public-media-bucket
-   S3_PRIVATE_BUCKET=your-private-audio-bucket
-   S3_ACCESS_KEY_ID=tid_your_access_key
-   S3_SECRET_ACCESS_KEY=tsec_your_secret_key
-   S3_PUBLIC_ACCESS_KEY_ID=tid_public_key_optional
-   S3_PUBLIC_SECRET_ACCESS_KEY=tsec_public_secret_optional
-   S3_PRIVATE_ACCESS_KEY_ID=tid_private_key_optional
-   S3_PRIVATE_SECRET_ACCESS_KEY=tsec_private_secret_optional
-   S3_PUBLIC_URL=https://your-public-media-bucket.t3.storage.dev
-   ```
-
-   Separate public/private pairs override the shared pair; if a key is only for one bucket, set it in the corresponding pair. `S3_PUBLIC_URL` must be a working public URL for the public bucket. Keep the private bucket private.
-4. Admin uploads are sent directly from the browser to Tigris with short-lived signed PUT URLs, bypassing Vercel function body limits. In Tigris bucket CORS settings, allow your production site origin (and localhost during development). For an S3-style CORS editor, use a rule like this and replace the origins with your actual app origins:
-
-   ```json
-   [{"AllowedOrigins":["https://YOUR_PRODUCTION_DOMAIN","http://localhost:3000"],"AllowedMethods":["PUT","GET","HEAD"],"AllowedHeaders":["Content-Type"],"ExposeHeaders":["ETag"],"MaxAgeSeconds":3000}]
-   ```
-
-   Do not use wildcard origins unless you intentionally allow any website to upload using a signed URL. Add all four split credential variables and the bucket names to Vercel, then redeploy.
-5. Full audio, full video, and album ZIP archives use the private bucket. Audio/video previews, album preview clips, and images use the public bucket. `/admin` has Albums, Download videos, and Merch sections; the public merch store is at `/merch`. Apply all additive SQL files in `docs/migrations/` to an existing database after taking a backup. Merch checkout collects the buyer's size and delivery details; manage fulfillment from Admin → Sales.
-
-Tigris's AWS SDK configuration requires virtual-host-style requests; `S3_FORCE_PATH_STYLE=false` configures this. For other S3-compatible providers, use their required addressing style. `S3_FORCE_PATH_STYLE` defaults to `true` to preserve the existing Cloudflare R2-style configuration.
-
-### Other S3-compatible storage
-
-Set `S3_ENDPOINT`, `S3_REGION`, `S3_PUBLIC_BUCKET`, `S3_PRIVATE_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and `S3_PUBLIC_URL` to the values from your provider. `S3_FORCE_PATH_STYLE` should be set to `false` or `true` to match the provider's S3 SDK instructions. Keep private audio in a private bucket.
-
-When S3 credentials are not configured, development uploads are stored locally under `public/uploads/` and `.private-uploads/`. Public media can use Vercel Blob when `BLOB_READ_WRITE_TOKEN` is configured; do not use public Blob storage for full audio. Production private audio uploads require complete S3-compatible storage configuration, and production public uploads require complete S3-compatible storage or Vercel Blob. Local filesystem storage is not suitable for production or ephemeral deployments; production uploads now fail explicitly when no persistent storage is configured.
-
-The supplied artist photos and logo are bundled under `public/pics/` and used as the default hero and portfolio gallery. The admin can replace the hero photo, upload more gallery images, edit the artist profile and biography, publish songs, curate the portfolio, moderate comments, and update social and streaming links.
+Full audio, full video, and album ZIP archives use the private bucket. Audio/video previews and images use the public bucket. `/admin` has Albums, Upload videos, and Merch sections; the public merch store is at `/merch`. Apply additive SQL files in `docs/migrations/` after taking a database backup.
 
 ## 5. Run the site
 
@@ -134,8 +103,8 @@ For production, set the environment variables in the hosting provider's secret/c
 1. Push the project to GitHub and confirm the `CI` workflow passes on the deployment branch. It runs lint, typecheck, applies the Drizzle schema to a temporary PostgreSQL database, and builds the app. The database and secrets in CI are disposable test values; do not copy them to production.
 2. Configure production secrets in the host dashboard, not in Git. At minimum set `DATABASE_URL`, a high-entropy `JWT_SECRET`, `ADMIN_EMAIL`, and the exact HTTPS `NEXT_PUBLIC_SITE_URL`. Add `ADMIN_SETUP_TOKEN` for initial admin signup; remove or rotate it after the administrator account is created. Add provider credentials only for features you have enabled.
 3. Configure the PostgreSQL provider's backups and point-in-time recovery, and verify you can restore a backup before storing real purchases or user accounts.
-4. Configure durable media storage before enabling admin uploads. Set the S3 variables for both public and private buckets, or use Vercel Blob for public media plus S3 for private full audio. Never expose the private bucket publicly.
-5. Configure Tigris bucket CORS for direct browser PUTs; large media does not pass through a Vercel function. The signed upload endpoint enforces media type and size limits. Apply the SQL files under `docs/migrations/` to the production database after backing it up; these add the album/video catalog and merch order columns.
+4. Configure Supabase Storage before enabling admin uploads. Set the Supabase URL and server-side Storage secret in Vercel, and create the public and private buckets as documented above. Never expose the private bucket publicly. Set `SUPABASE_MAX_FILE_SIZE_BYTES` to the size configured in Supabase (the Free plan default is 52428800 bytes); the app defaults to that 50 MB cap.
+5. Large admin uploads use resumable Supabase Storage uploads directly from the browser and enforce media type and size limits before signing. Apply the SQL files under `docs/migrations/` to the production database after backing it up; these add the album/video catalog and merch order columns.
 6. Configure shared rate limiting at the host, CDN, or WAF for login, password reset, signup, checkout, donations, comments, and upload endpoints. The app's in-memory rate limiter is only a per-process fallback and does not coordinate across serverless instances or multiple replicas.
 7. Deploy to a staging URL first. Test admin login, password recovery email, any enabled Google sign-in, public media upload, a private audio download, and Flutterwave test-mode checkout plus webhook. Confirm cancelled/failed payments never unlock audio.
 8. Only after these checks pass, set production payment credentials and provider callback URLs, redeploy, and make a small live transaction that you can refund through the provider dashboard.
@@ -144,11 +113,13 @@ The CI workflow is a build and static-check gate, not a full automated test suit
 
 For an existing production database, do not blindly run `drizzle-kit push` against live data. Back it up first, review the schema diff, and apply changes in a maintenance window. This project currently does not include a migration history, so establish a Drizzle migration baseline before adopting generated migrations for ongoing production schema changes.
 
-### Netlify
+### Vercel
 
-Connect the GitHub repository to Netlify and deploy the `master` branch. The included `netlify.toml` uses the Next.js build command and standard Next.js output so Netlify's Next.js adapter can handle server rendering and API routes. Set the required environment variables in the Netlify site settings. Set `NEXT_PUBLIC_SITE_URL` to the assigned `https://<site>.netlify.app` URL, then redeploy.
+Import the connected GitHub repository into Vercel and use the Next.js preset with the project root as the root directory. Vercel manages the Next.js output mode automatically. Add the runtime variables in **Project Settings → Environment Variables** for Production and Preview as appropriate. At minimum, set `DATABASE_URL` to Supabase's transaction pooler connection string, a high-entropy `JWT_SECRET`, `ADMIN_EMAIL`, and the exact HTTPS `NEXT_PUBLIC_SITE_URL`. Add `DIRECT_URL` for local schema tooling only; it is not needed by application requests.
 
-For Google sign-in, add `https://<site>.netlify.app/api/auth/google/callback` to the Google OAuth client's authorized redirect URIs. Configure Flutterwave's webhook at `https://<site>.netlify.app/api/payments/webhook/flutterwave` if payments are enabled. Netlify's filesystem is ephemeral: configure S3-compatible storage before using uploads.
+Admin uploads use signed Supabase Storage URLs. Configure the `media-public` and `media-private` buckets and the server-side Supabase secret in Vercel. Full audio, video, and album archives use the private bucket; covers, previews, gallery photos, and hero images use the public bucket. After adding or changing Vercel environment variables, redeploy and verify uploads and a private download.
+
+Add `https://YOUR_PUBLIC_DOMAIN/api/auth/google/callback` to the Google OAuth client's authorized redirect URIs. Configure Flutterwave's webhook at `https://YOUR_PUBLIC_DOMAIN/api/payments/webhook/flutterwave` if payments are enabled.
 
 ### Docker
 

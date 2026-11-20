@@ -8,14 +8,16 @@ if (!databaseUrl) {
 }
 
 const globalForDb = globalThis as typeof globalThis & {
-  __arenaNextJsPostgresqlPool?: Pool;
+  __kingRhymesPostgresqlPool?: Pool;
 };
 
 export const pool =
-  globalForDb.__arenaNextJsPostgresqlPool ??
+  globalForDb.__kingRhymesPostgresqlPool ??
   new Pool({
     connectionString: databaseUrl,
-    max: 5,
+    // Vercel can create many short-lived serverless instances. Keep each
+    // instance to one connection and use Supabase's transaction pooler URL.
+    max: process.env.NODE_ENV === "production" ? 1 : 5,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
     keepAlive: true,
@@ -23,7 +25,7 @@ export const pool =
   });
 
 if (process.env.NODE_ENV !== "production") {
-  globalForDb.__arenaNextJsPostgresqlPool = pool;
+  globalForDb.__kingRhymesPostgresqlPool = pool;
 }
 
 export const db = drizzle(pool);

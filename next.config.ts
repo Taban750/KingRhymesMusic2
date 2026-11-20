@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Keep standalone packaging for Docker by default. Hosts that run `next start`
-  // or use the Netlify adapter must use Next.js's default output mode.
-  output: process.env.NEXT_OUTPUT === "default" ? undefined : "standalone",
+  // Vercel manages Next.js output itself. Keep standalone packaging for Docker
+  // and other self-hosted deployments only.
+  output: process.env.VERCEL || process.env.NEXT_OUTPUT === "default" ? undefined : "standalone",
   devIndicators: false,
   experimental: {
     optimizePackageImports: ["framer-motion"],

@@ -24,7 +24,11 @@ export async function POST(req: Request) {
     if (!rule || typeof name !== "string" || typeof type !== "string" || !Number.isSafeInteger(size) || size <= 0) return NextResponse.json({ error: "Invalid upload request" }, { status: 400 });
     const ext = name.split(".").pop()?.toLowerCase() || "";
     if (!rule.extensions.includes(ext)) return NextResponse.json({ error: `Unsupported ${kind} file type` }, { status: 400 });
-    if (size > rule.max) return NextResponse.json({ error: `File too large (max ${Math.floor(rule.max / 1024 ** 2)}MB)` }, { status: 413 });
+    const configuredStorageMax = Number(process.env.SUPABASE_MAX_FILE_SIZE_BYTES || 50 * 1024 ** 2);
+    const maxFileSize = Number.isSafeInteger(configuredStorageMax) && configuredStorageMax > 0
+      ? Math.min(rule.max, configuredStorageMax)
+      : Math.min(rule.max, 50 * 1024 ** 2);
+    if (size > maxFileSize) return NextResponse.json({ error: `File too large for the configured Supabase Storage limit (max ${Math.floor(maxFileSize / 1024 ** 2)}MB)` }, { status: 413 });
     const result = await createUploadUrl(kind, name, type || "application/octet-stream");
     return NextResponse.json(result);
   } catch (e) {
