@@ -9,7 +9,7 @@ npm install
 Copy-Item .env.example .env.local
 ```
 
-Configure `DATABASE_URL` with the Supabase **Transaction pooler** connection string from the project's **Connect** dialog. Use the pooler on port `6543` for the Vercel runtime. Set `DIRECT_URL` to the Supabase direct connection string from the same dialog for local schema tools. Keep secrets private; `.env.local` is excluded from source control. Set `ADMIN_EMAIL` to the artist's account email. Generate separate random values for `JWT_SECRET` and `ADMIN_SETUP_TOKEN`:
+Configure `DATABASE_URL` with the Supabase **Transaction pooler** connection string from the project's **Connect** dialog. Use the pooler on port `6543` for the Vercel runtime. Set `DIRECT_URL` to the Supabase direct connection string from the same dialog for local schema tools. With node-postgres, append `&uselibpqcompat=true` to `sslmode=require` so the connection remains TLS encrypted while using PostgreSQL's documented `require` mode semantics. Keep secrets private; `.env.local` is excluded from source control. Set `ADMIN_EMAIL` to the artist's account email. Generate separate random values for `JWT_SECRET` and `ADMIN_SETUP_TOKEN`:
 
 ```powershell
 node -p "require('crypto').randomBytes(48).toString('base64url')"

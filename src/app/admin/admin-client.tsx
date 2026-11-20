@@ -1,5 +1,4 @@
 "use client";
-import { Upload as TusUpload } from "tus-js-client";
 import { useEffect, useState } from "react";
 import { Button, Input, Textarea, Card, Badge, Modal } from "@/components/ui";
 import { useToast } from "@/components/providers";
@@ -67,25 +66,14 @@ export default function AdminClient({ user }: { user: { email: string; displayNa
       const sign = await fetch("/api/upload/presign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: file.name, type: file.type || "application/octet-stream", size: file.size, kind }) });
       const j = await sign.json();
       if (!sign.ok) throw new Error(j.error || "Upload setup failed");
-      if (file.size > 6 * 1024 * 1024) {
-        if (!j.token || !j.resumableEndpoint || !j.bucket || !j.objectName) throw new Error("Supabase resumable upload setup failed");
-        await new Promise<void>((resolve, reject) => {
-          const upload = new TusUpload(file, {
-            endpoint: j.resumableEndpoint,
-            retryDelays: [0, 3000, 5000, 10000, 20000],
-            headers: { "x-signature": j.token },
-            uploadDataDuringCreation: true,
-            removeFingerprintOnSuccess: true,
-            chunkSize: 6 * 1024 * 1024,
-            metadata: { bucketName: j.bucket, objectName: j.objectName, contentType: file.type || "application/octet-stream", cacheControl: "31536000" },
-            onError: reject,
-            onSuccess: () => resolve(),
-          });
-          upload.start();
-        });
-      } else {
-        const putResult = await fetch(j.uploadUrl, { method: "PUT", headers: j.headers || { "Content-Type": file.type || "application/octet-stream" }, body: file });
-        if (!putResult.ok) throw new Error(`Supabase upload failed (${putResult.status}). Check the bucket and storage settings.`);
+      // Supabase signed uploads support files up to the configured bucket limit (50 MB
+      // on the current plan). The TUS endpoint rejected these signed tokens in production,
+      // so use the same signed PUT flow for every accepted file until resumable uploads are
+      // explicitly enabled and verified for this project.
+      const putResult = await fetch(j.uploadUrl, { method: "PUT", headers: j.headers || { "Content-Type": file.type || "application/octet-stream" }, body: file });
+      if (!putResult.ok) {
+        const detail = await putResult.text().catch(() => "");
+        throw new Error(`Supabase upload failed (${putResult.status})${detail ? `: ${detail.slice(0, 180)}` : ""}`);
       }
       push("Uploaded ✓", "success");
       return j.path as string;

@@ -53,15 +53,9 @@ export async function createUploadUrl(kind: MediaKind, originalName: string, con
   const storedPath = privateMedia
     ? `supabase-private://${key}`
     : `${supabaseUrl()}/storage/v1/object/public/${encodeURIComponent(bucket)}/${key.split("/").map(encodeURIComponent).join("/")}`;
-  const projectHost = new URL(supabaseUrl()).host;
-  const storageHost = projectHost.endsWith(".supabase.co")
-    ? `${projectHost.slice(0, -".supabase.co".length)}.storage.supabase.co`
-    : projectHost;
   return {
     uploadUrl, path: storedPath, method: "PUT" as const,
-    headers: { "Content-Type": contentType }, token: result.token,
-    bucket, objectName: key,
-    resumableEndpoint: `https://${storageHost}/storage/v1/upload/resumable`,
+    headers: { "Content-Type": contentType },
   };
 }
 
